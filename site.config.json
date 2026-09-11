@@ -4,6 +4,8 @@
   "author": "",
 "description": "A quiet collection of photographs of my personal memories",
   "lang": "en",
-  "yearTitles": {},
+  "topicTitles": {
+    "2026": "2026 Collection"
+  },
   "captions": {}
 }

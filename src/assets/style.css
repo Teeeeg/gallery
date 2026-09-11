@@ -92,12 +92,50 @@ button {
   color: var(--muted);
 }
 
+/* ---------- topics ---------- */
+
+.topics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.75rem;
+  margin-top: 1.5rem;
+}
+
+.topics__button {
+  padding-bottom: 0.3rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid transparent;
+  transition: color 0.25s ease, border-color 0.25s ease;
+}
+
+.topics__button:hover {
+  color: var(--ink);
+}
+
+.topics__button[aria-pressed="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.topics__button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 4px;
+}
+
 /* ---------- chapters ---------- */
 
 .book {
   max-width: 90rem;
   margin: 0 auto;
   padding: 0 var(--gap);
+}
+
+.chapter[hidden] {
+  display: none;
 }
 
 .chapter + .chapter {

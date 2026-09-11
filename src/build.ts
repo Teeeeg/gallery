@@ -18,12 +18,12 @@ interface SiteConfig {
   author?: string;
   description: string;
   lang?: string;
-  yearTitles?: Record<string, string>;
+  topicTitles?: Record<string, string>;
   captions?: Record<string, string>;
 }
 
 interface Source {
-  year: string;
+  topic: string;
   file: string;
   abs: string;
 }
@@ -41,7 +41,7 @@ interface ExifInfo {
 interface Photo extends ExifInfo {
   key: string;
   slug: string;
-  year: string;
+  topic: string;
   width: number;
   height: number;
   caption: string;
@@ -90,7 +90,7 @@ const FULL_WIDTHS = [1600, 2560];
 const WEBP = { quality: 80, effort: 5 } as const;
 
 /** Bump to invalidate cached metadata when the EXIF formatting changes. */
-const EXIF_VERSION = 2;
+const EXIF_VERSION = 3;
 
 const site = JSON.parse(
   await readFile(path.join(root, "site.config.json"), "utf8"),
@@ -101,18 +101,18 @@ const rendered = new Set<string>();
 
 async function collectSources(): Promise<Source[]> {
   const out: Source[] = [];
-  const years = (await readdir(photoDir, { withFileTypes: true }))
+  const topics = (await readdir(photoDir, { withFileTypes: true }))
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
     .sort()
     .reverse();
 
-  for (const year of years) {
-    const dir = path.join(photoDir, year);
+  for (const topic of topics) {
+    const dir = path.join(photoDir, topic);
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (!entry.isFile()) continue;
       if (!SOURCE_EXT.has(path.extname(entry.name).toLowerCase())) continue;
-      out.push({ year, file: entry.name, abs: path.join(dir, entry.name) });
+      out.push({ topic, file: entry.name, abs: path.join(dir, entry.name) });
     }
   }
   return out;
@@ -126,17 +126,26 @@ async function loadCache(): Promise<Cache> {
   }
 }
 
-function slugify(year: string, file: string): string {
+function slugify(topic: string, file: string): string {
   const base = path
     .basename(file, path.extname(file))
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-");
   const hash = createHash("sha1")
-    .update(`${year}/${file}`)
+    .update(`${topic}/${file}`)
     .digest("hex")
     .slice(0, 6);
   return `${base.replace(/^-|-$/g, "") || "photo"}-${hash}`;
 }
+
+const topicId = (topic: string): string =>
+  topic
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "topic";
+
+const topicTitle = (topic: string): string =>
+  site.topicTitles?.[topic] ?? topic;
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" ? value : null;
@@ -226,9 +235,9 @@ function pickWidths(available: number[], wanted: number[]): number[] {
 
 async function buildPhoto(source: Source, cache: Cache): Promise<SizedPhoto> {
   const info = await stat(source.abs);
-  const key = `${source.year}/${source.file}`;
+  const key = `${source.topic}/${source.file}`;
   const stamp = `${EXIF_VERSION}:${info.mtimeMs}:${info.size}`;
-  const slug = slugify(source.year, source.file);
+  const slug = slugify(source.topic, source.file);
   const cached = cache[key];
 
   if (cached?.stamp === stamp) {
@@ -261,7 +270,7 @@ async function buildPhoto(source: Source, cache: Cache): Promise<SizedPhoto> {
   const photo: Photo = {
     key,
     slug,
-    year: source.year,
+    topic: source.topic,
     width,
     height,
     caption: site.captions?.[key] ?? "",
@@ -330,6 +339,7 @@ function renderHtml(
   const total = photos.length;
   const lightboxData = photos.map((photo) => ({
     slug: photo.slug,
+    topic: photo.topic,
     src: `media/${photo.slug}-${pickWidths(photo.widths, FULL_WIDTHS)[0]}.webp`,
     srcset: srcset(photo, pickWidths(photo.widths, FULL_WIDTHS)),
     width: photo.width,
@@ -339,14 +349,22 @@ function renderHtml(
     exif: exifLine(photo),
   }));
 
+  const topics = [
+    `      <button class="topics__button" type="button" data-topic="" aria-pressed="true">All</button>`,
+    ...groups.map(
+      ([topic]) =>
+        `      <button class="topics__button" type="button" data-topic="${escapeHtml(topic)}" aria-pressed="false">${escapeHtml(topicTitle(topic))}</button>`,
+    ),
+  ].join("\n");
+
   const sections = groups
     .map(
       ([
-        year,
+        topic,
         items,
-      ]) => `      <section class="chapter" id="year-${escapeHtml(year)}">
+      ]) => `      <section class="chapter" id="topic-${topicId(topic)}" data-topic="${escapeHtml(topic)}">
         <header class="chapter__header">
-          <h2 class="chapter__title">${escapeHtml(site.yearTitles?.[year] ?? year)}</h2>
+          <h2 class="chapter__title">${escapeHtml(topicTitle(topic))}</h2>
           <p class="chapter__meta">${items.length} ${items.length === 1 ? "photograph" : "photographs"}</p>
         </header>
         <div class="grid">
@@ -376,6 +394,9 @@ ${items.map((photo) => figureHtml(photo)).join("\n")}
     <h1 class="masthead__title">${escapeHtml(site.title)}</h1>
     ${site.subtitle ? `<p class="masthead__subtitle">${escapeHtml(site.subtitle)}</p>` : ""}
     <p class="masthead__count">${total} ${total === 1 ? "photograph" : "photographs"}</p>
+    <nav class="topics" aria-label="Topics">
+${topics}
+    </nav>
   </header>
 
   <main id="book" class="book">
@@ -417,7 +438,7 @@ async function main(): Promise<void> {
   const sources = await collectSources();
   if (sources.length === 0) {
     throw new Error(
-      `No images found under ${path.relative(root, photoDir)}/<year>/`,
+      `No images found under ${path.relative(root, photoDir)}/<topic>/`,
     );
   }
 
@@ -430,7 +451,7 @@ async function main(): Promise<void> {
   process.stdout.write("\n");
 
   built.sort((a, b) => {
-    if (a.year !== b.year) return b.year.localeCompare(a.year);
+    if (a.topic !== b.topic) return b.topic.localeCompare(a.topic);
     return (b.taken ?? b.mtime).localeCompare(a.taken ?? a.mtime);
   });
   const photos: IndexedPhoto[] = built.map((photo, index) => ({
@@ -441,8 +462,8 @@ async function main(): Promise<void> {
   const groups: Array<[string, IndexedPhoto[]]> = [];
   for (const photo of photos) {
     const last = groups.at(-1);
-    if (last && last[0] === photo.year) last[1].push(photo);
-    else groups.push([photo.year, [photo]]);
+    if (last && last[0] === photo.topic) last[1].push(photo);
+    else groups.push([photo.topic, [photo]]);
   }
 
   await writeFile(path.join(outDir, "index.html"), renderHtml(groups, photos));
