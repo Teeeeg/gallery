@@ -23,12 +23,43 @@ const counter = dialog.querySelector(".lightbox__counter") as HTMLElement;
 /** Indices of the photos the current topic exposes; the lightbox walks this list. */
 let order = photos.map((_, index) => index);
 let cursor = 0;
+let zoom = 1;
+
+const clampPercent = (value: number): number =>
+  Math.max(0, Math.min(100, value));
+
+/** Panning is done by moving the scale origin under the pointer. */
+function setOrigin(clientX: number, clientY: number): void {
+  const rect = image.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const x = clampPercent(((clientX - rect.left) / rect.width) * 100);
+  const y = clampPercent(((clientY - rect.top) / rect.height) * 100);
+  image.style.transformOrigin = `${x}% ${y}%`;
+}
+
+function setZoom(level: number): void {
+  zoom = level;
+  image.style.transform = level === 1 ? "" : `scale(${level})`;
+  image.classList.toggle("is-zoomed", level > 1);
+}
+
+function toggleZoom(clientX: number, clientY: number): void {
+  if (zoom > 1) {
+    setZoom(1);
+    return;
+  }
+  const rect = image.getBoundingClientRect();
+  const native = rect.width ? image.naturalWidth / rect.width : 2;
+  setOrigin(clientX, clientY);
+  setZoom(Math.min(4, Math.max(1.8, native)));
+}
 
 function show(position: number): void {
   if (order.length === 0) return;
   cursor = (position + order.length) % order.length;
   const photo = photos[order[cursor]];
 
+  setZoom(1);
   image.classList.remove("is-ready");
   image.removeAttribute("srcset");
   image.src = photo.src;
@@ -67,18 +98,24 @@ function openLightbox(index: number): void {
 
 image.addEventListener("load", () => image.classList.add("is-ready"));
 
+image.addEventListener("mousemove", (event) => {
+  if (zoom > 1) setOrigin(event.clientX, event.clientY);
+});
+
 dialog.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   const action = target?.closest<HTMLElement>("[data-action]")?.dataset.action;
   if (action === "prev") show(cursor - 1);
   else if (action === "next") show(cursor + 1);
   else if (action === "close") dialog.close();
+  else if (target === image) toggleZoom(event.clientX, event.clientY);
   else if (event.target === dialog || target?.closest(".lightbox__figure"))
     dialog.close();
 });
 
 dialog.addEventListener("close", () => {
   document.body.style.overflow = "";
+  setZoom(1);
   document
     .querySelector<HTMLElement>(
       `.tile[data-index="${order[cursor]}"] .tile__button`,
@@ -106,9 +143,25 @@ dialog.addEventListener(
 );
 
 dialog.addEventListener(
+  "touchmove",
+  (event) => {
+    if (zoom > 1) {
+      setOrigin(
+        event.changedTouches[0].clientX,
+        event.changedTouches[0].clientY,
+      );
+    }
+  },
+  { passive: true },
+);
+
+dialog.addEventListener(
   "touchend",
   (event) => {
-    if (touchX === null) return;
+    if (touchX === null || zoom > 1) {
+      touchX = null;
+      return;
+    }
     const delta = event.changedTouches[0].clientX - touchX;
     if (Math.abs(delta) > 60) show(cursor + (delta < 0 ? 1 : -1));
     touchX = null;

@@ -33,6 +33,10 @@ body {
 img {
   display: block;
   max-width: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
 }
 
 button {
@@ -279,7 +283,13 @@ button {
   height: auto;
   object-fit: contain;
   opacity: 0;
-  transition: opacity 0.35s ease;
+  cursor: zoom-in;
+  transition: opacity 0.35s ease,
+    transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.lightbox__image.is-zoomed {
+  cursor: zoom-out;
 }
 
 .lightbox__image.is-ready {
