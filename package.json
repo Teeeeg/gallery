@@ -5,10 +5,12 @@
   "type": "module",
   "description": "A quiet, white photo book generated as a static site.",
   "scripts": {
-    "build": "node src/build.mjs",
-    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\"",
-    "preview": "npm run build && node --run serve",
-    "serve": "node src/serve.mjs"
+    "build": "npm run compile && node .compiled/build.js",
+    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.compiled',{recursive:true,force:true})\"",
+    "compile": "tsc -p tsconfig.json && tsc -p src/assets/tsconfig.json",
+    "preview": "npm run build && npm run serve",
+    "serve": "node .compiled/serve.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/assets/tsconfig.json --noEmit"
   },
   "engines": {
     "node": ">=20"
@@ -16,5 +18,9 @@
   "dependencies": {
     "exif-reader": "^2.0.2",
     "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
   }
 }
