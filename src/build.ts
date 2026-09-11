@@ -19,6 +19,7 @@ interface SiteConfig {
   description: string;
   lang?: string;
   topicTitles?: Record<string, string>;
+  topicNotes?: Record<string, string>;
   captions?: Record<string, string>;
 }
 
@@ -53,8 +54,11 @@ interface SizedPhoto extends Photo {
   widths: number[];
 }
 
-interface IndexedPhoto extends SizedPhoto {
-  index: number;
+/** One topic: its folder name, the url segment it is published under, and its photographs. */
+interface Group {
+  topic: string;
+  id: string;
+  items: SizedPhoto[];
 }
 
 interface CacheEntry {
@@ -91,6 +95,12 @@ const WEBP = { quality: 80, effort: 5 } as const;
 
 /** Bump to invalidate cached metadata when the EXIF formatting changes. */
 const EXIF_VERSION = 3;
+
+const PHOTOSWIPE_ASSETS: Array<[string, string]> = [
+  ["photoswipe.esm.min.js", "photoswipe.esm.js"],
+  ["photoswipe-lightbox.esm.min.js", "photoswipe-lightbox.esm.js"],
+  ["photoswipe.css", "photoswipe.css"],
+];
 
 const site = JSON.parse(
   await readFile(path.join(root, "site.config.json"), "utf8"),
@@ -286,8 +296,8 @@ async function buildPhoto(source: Source, cache: Cache): Promise<SizedPhoto> {
 const escapeHtml = (value: unknown): string =>
   String(value ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const srcset = (photo: SizedPhoto, widths: number[]): string =>
-  widths.map((w) => `media/${photo.slug}-${w}.webp ${w}w`).join(", ");
+const srcset = (photo: SizedPhoto, widths: number[], prefix: string): string =>
+  widths.map((w) => `${prefix}media/${photo.slug}-${w}.webp ${w}w`).join(", ");
 
 function exifLine(photo: Photo): string {
   return [
@@ -312,120 +322,213 @@ function displayDate(photo: Photo): string {
   });
 }
 
-function figureHtml(photo: IndexedPhoto): string {
-  const index = photo.index;
+function figureHtml(
+  photo: SizedPhoto,
+  position: number,
+  prefix: string,
+): string {
   const gridWidths = pickWidths(photo.widths, GRID_WIDTHS);
-  return `        <figure class="tile" data-index="${index}" style="--ratio:${photo.width} / ${photo.height}">
-          <button class="tile__button" type="button" aria-label="Open photo ${index + 1}">
+  const fullWidths = pickWidths(photo.widths, FULL_WIDTHS);
+  const fullWidth = fullWidths[fullWidths.length - 1];
+  const fullHeight = Math.round((photo.height * fullWidth) / photo.width);
+  return `        <figure class="tile" style="--ratio:${photo.width} / ${photo.height}">
+          <a
+            class="tile__link"
+            href="${prefix}media/${photo.slug}-${fullWidth}.webp"
+            data-pswp-width="${fullWidth}"
+            data-pswp-height="${fullHeight}"
+            data-pswp-srcset="${srcset(photo, fullWidths, prefix)}"
+            data-caption="${escapeHtml(photo.caption)}"
+            data-date="${escapeHtml(displayDate(photo))}"
+            data-exif="${escapeHtml(exifLine(photo))}"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open photograph ${position + 1}">
             <img
               class="tile__image"
-              src="media/${photo.slug}-${gridWidths[0]}.webp"
-              srcset="${srcset(photo, gridWidths)}"
+              src="${prefix}media/${photo.slug}-${gridWidths[0]}.webp"
+              srcset="${srcset(photo, gridWidths, prefix)}"
               sizes="(max-width: 700px) 92vw, (max-width: 1180px) 44vw, 30vw"
               width="${photo.width}"
               height="${photo.height}"
               loading="lazy"
               decoding="async"
-              alt="${escapeHtml(photo.caption || `Photograph ${index + 1}`)}"
+              alt="${escapeHtml(photo.caption || `Photograph ${position + 1}`)}"
               style="background-image:url(${photo.placeholder})" />
-          </button>
+          </a>
         </figure>`;
 }
 
-function renderHtml(
-  groups: Array<[string, IndexedPhoto[]]>,
-  photos: IndexedPhoto[],
+/** Month, or span of months, the photographs of a topic were taken in. */
+function topicRange(items: SizedPhoto[]): string {
+  const dates = items
+    .map((photo) => photo.taken ?? photo.mtime)
+    .filter(Boolean)
+    .sort();
+  if (dates.length === 0) return "";
+  const label = (iso: string): string =>
+    new Date(iso).toLocaleDateString(site.lang || "en", {
+      year: "numeric",
+      month: "long",
+    });
+  const first = label(dates[0]);
+  const last = label(dates[dates.length - 1]);
+  return first === last ? first : `${first} \u2013 ${last}`;
+}
+
+const photographs = (n: number): string =>
+  `${n} ${n === 1 ? "photograph" : "photographs"}`;
+
+function chaptersMenu(
+  groups: Group[],
+  prefix: string,
+  active: string | null,
 ): string {
-  const total = photos.length;
-  const lightboxData = photos.map((photo) => ({
-    slug: photo.slug,
-    topic: photo.topic,
-    src: `media/${photo.slug}-${pickWidths(photo.widths, FULL_WIDTHS)[0]}.webp`,
-    srcset: srcset(photo, pickWidths(photo.widths, FULL_WIDTHS)),
-    width: photo.width,
-    height: photo.height,
-    caption: photo.caption,
-    date: displayDate(photo),
-    exif: exifLine(photo),
-  }));
+  const items = groups.map(({ topic, id, items: photos }) => {
+    const cover = photos[0];
+    const thumb = pickWidths(cover.widths, GRID_WIDTHS)[0];
+    return `        <li>
+          <a class="chapters__item" href="${prefix}${id}/"${active === topic ? ' aria-current="page"' : ""}>
+            <img class="chapters__thumb" src="${prefix}media/${cover.slug}-${thumb}.webp" alt="" width="56" height="56" loading="lazy" decoding="async" />
+            <span>
+              <span class="chapters__name">${escapeHtml(topicTitle(topic))}</span>
+              <span class="chapters__count">${photographs(photos.length)}</span>
+            </span>
+          </a>
+        </li>`;
+  });
 
-  const topics = [
-    `      <button class="topics__button" type="button" data-topic="" aria-pressed="true">All</button>`,
-    ...groups.map(
-      ([topic]) =>
-        `      <button class="topics__button" type="button" data-topic="${escapeHtml(topic)}" aria-pressed="false">${escapeHtml(topicTitle(topic))}</button>`,
-    ),
-  ].join("\n");
+  return `  <nav class="chapters" aria-label="Chapters">
+    <details class="chapters__menu">
+      <summary class="chapters__summary">Chapters</summary>
+      <ul class="chapters__list">
+        <li>
+          <a class="chapters__all" href="${prefix || "./"}"${active === null ? ' aria-current="page"' : ""}>All chapters</a>
+        </li>
+${items.join("\n")}
+      </ul>
+    </details>
+  </nav>`;
+}
 
-  const sections = groups
-    .map(
-      ([
-        topic,
-        items,
-      ]) => `      <section class="chapter" id="topic-${topicId(topic)}" data-topic="${escapeHtml(topic)}">
-        <header class="chapter__header">
-          <h2 class="chapter__title">${escapeHtml(topicTitle(topic))}</h2>
-          <p class="chapter__meta">${items.length} ${items.length === 1 ? "photograph" : "photographs"}</p>
-        </header>
-        <div class="grid">
-${items.map((photo) => figureHtml(photo)).join("\n")}
-        </div>
-      </section>`,
-    )
-    .join("\n");
-
+function documentHtml(options: {
+  prefix: string;
+  title: string;
+  description: string;
+  body: string;
+}): string {
+  const { prefix, title, description, body } = options;
+  const base = prefix || "./";
   return `<!DOCTYPE html>
 <html lang="${escapeHtml(site.lang || "en")}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(site.title)}</title>
-  <meta name="description" content="${escapeHtml(site.description)}" />
+  <title>${escapeHtml(title)}</title>
+  <meta name="description" content="${escapeHtml(description)}" />
   <meta name="color-scheme" content="light" />
-  <meta property="og:title" content="${escapeHtml(site.title)}" />
-  <meta property="og:description" content="${escapeHtml(site.description)}" />
+  <meta property="og:title" content="${escapeHtml(title)}" />
+  <meta property="og:description" content="${escapeHtml(description)}" />
   <meta property="og:type" content="website" />
-  <link rel="stylesheet" href="assets/style.css" />
+  <link rel="stylesheet" href="${prefix}assets/photoswipe.css" />
+  <link rel="stylesheet" href="${prefix}assets/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "photoswipe": "${base}assets/photoswipe.esm.js",
+        "photoswipe/lightbox": "${base}assets/photoswipe-lightbox.esm.js"
+      }
+    }
+  </script>
 </head>
 <body>
   <a class="skip" href="#book">Skip to photographs</a>
 
-  <header class="masthead">
-    <h1 class="masthead__title">${escapeHtml(site.title)}</h1>
-    ${site.subtitle ? `<p class="masthead__subtitle">${escapeHtml(site.subtitle)}</p>` : ""}
-    <p class="masthead__count">${total} ${total === 1 ? "photograph" : "photographs"}</p>
-    <nav class="topics" aria-label="Topics">
-${topics}
-    </nav>
-  </header>
+${body}
 
-  <main id="book" class="book">
-${sections}
-  </main>
-
-  <footer class="colophon">
-    <p>${escapeHtml(site.author ? `\u00a9 ${new Date().getFullYear()} ${site.author}` : `\u00a9 ${new Date().getFullYear()}`)}</p>
-  </footer>
-
-  <dialog class="lightbox" id="lightbox" aria-label="Photo viewer">
-    <button class="lightbox__close" type="button" data-action="close" aria-label="Close">&#215;</button>
-    <button class="lightbox__nav lightbox__nav--prev" type="button" data-action="prev" aria-label="Previous photo">&#8249;</button>
-    <button class="lightbox__nav lightbox__nav--next" type="button" data-action="next" aria-label="Next photo">&#8250;</button>
-    <figure class="lightbox__figure">
-      <img class="lightbox__image" alt="" />
-      <figcaption class="lightbox__caption">
-        <span class="lightbox__text"></span>
-        <span class="lightbox__exif"></span>
-        <span class="lightbox__counter"></span>
-      </figcaption>
-    </figure>
-  </dialog>
-
-  <script type="application/json" id="photo-data">${JSON.stringify(lightboxData).replace(/</g, "\\u003c")}</script>
-  <script src="assets/app.js" defer></script>
+  <script type="module" src="${prefix}assets/app.js"></script>
 </body>
 </html>
 `;
+}
+
+function entryHtml(group: Group): string {
+  const { topic, id, items } = group;
+  const cover = items[0];
+  const coverWidths = pickWidths(cover.widths, GRID_WIDTHS);
+  const note = site.topicNotes?.[topic];
+  return `      <article class="entry">
+        <a class="entry__link" href="${id}/">
+          <div class="entry__cover" style="--ratio:${cover.width} / ${cover.height}">
+            <img
+              src="media/${cover.slug}-${coverWidths[0]}.webp"
+              srcset="${srcset(cover, coverWidths, "")}"
+              sizes="(max-width: 700px) 92vw, 44vw"
+              width="${cover.width}"
+              height="${cover.height}"
+              loading="lazy"
+              decoding="async"
+              alt=""
+              style="background-image:url(${cover.placeholder})" />
+          </div>
+          <div class="entry__body">
+            <h2 class="entry__title">${escapeHtml(topicTitle(topic))}</h2>
+            <p class="entry__meta">${[photographs(items.length), topicRange(items)].filter(Boolean).join("  \u00b7  ")}</p>
+            ${note ? `<p class="entry__note">${escapeHtml(note)}</p>` : ""}
+          </div>
+        </a>
+      </article>`;
+}
+
+function homeHtml(groups: Group[], total: number): string {
+  const body = `${chaptersMenu(groups, "", null)}
+
+  <header class="masthead">
+    <h1 class="masthead__title">${escapeHtml(site.title)}</h1>
+    ${site.subtitle ? `<p class="masthead__subtitle">${escapeHtml(site.subtitle)}</p>` : ""}
+    <p class="masthead__count">${groups.length} ${groups.length === 1 ? "chapter" : "chapters"}  \u00b7  ${photographs(total)}</p>
+  </header>
+
+  <main id="book" class="entries">
+${groups.map((group) => entryHtml(group)).join("\n")}
+  </main>`;
+
+  return documentHtml({
+    prefix: "",
+    title: site.title,
+    description: site.description,
+    body,
+  });
+}
+
+function topicPageHtml(group: Group, groups: Group[]): string {
+  const { topic, items } = group;
+  const title = topicTitle(topic);
+  const note = site.topicNotes?.[topic];
+  const body = `  <a class="back" href="../">
+    <span class="back__arrow" aria-hidden="true">\u2190</span>${escapeHtml(site.title)}
+  </a>
+
+${chaptersMenu(groups, "../", topic)}
+
+  <header class="masthead masthead--topic">
+    <h1 class="masthead__title">${escapeHtml(title)}</h1>
+    ${note ? `<p class="masthead__subtitle">${escapeHtml(note)}</p>` : ""}
+    <p class="masthead__count">${[photographs(items.length), topicRange(items)].filter(Boolean).join("  \u00b7  ")}</p>
+  </header>
+
+  <main id="book" class="book">
+    <div class="grid">
+${items.map((photo, position) => figureHtml(photo, position, "../")).join("\n")}
+    </div>
+  </main>`;
+
+  return documentHtml({
+    prefix: "../",
+    title: `${title} \u00b7 ${site.title}`,
+    description: note ?? site.description,
+    body,
+  });
 }
 
 async function main(): Promise<void> {
@@ -443,30 +546,42 @@ async function main(): Promise<void> {
   }
 
   const cache = await loadCache();
-  const built: SizedPhoto[] = [];
+  const photos: SizedPhoto[] = [];
   for (const source of sources) {
-    built.push(await buildPhoto(source, cache));
-    process.stdout.write(`\r  processed ${built.length}/${sources.length}`);
+    photos.push(await buildPhoto(source, cache));
+    process.stdout.write(`\r  processed ${photos.length}/${sources.length}`);
   }
   process.stdout.write("\n");
 
-  built.sort((a, b) => {
+  photos.sort((a, b) => {
     if (a.topic !== b.topic) return b.topic.localeCompare(a.topic);
     return (b.taken ?? b.mtime).localeCompare(a.taken ?? a.mtime);
   });
-  const photos: IndexedPhoto[] = built.map((photo, index) => ({
-    ...photo,
-    index,
-  }));
 
-  const groups: Array<[string, IndexedPhoto[]]> = [];
+  const groups: Group[] = [];
   for (const photo of photos) {
     const last = groups.at(-1);
-    if (last && last[0] === photo.topic) last[1].push(photo);
-    else groups.push([photo.topic, [photo]]);
+    if (last && last.topic === photo.topic) last.items.push(photo);
+    else
+      groups.push({
+        topic: photo.topic,
+        id: topicId(photo.topic),
+        items: [photo],
+      });
   }
 
-  await writeFile(path.join(outDir, "index.html"), renderHtml(groups, photos));
+  await writeFile(
+    path.join(outDir, "index.html"),
+    homeHtml(groups, photos.length),
+  );
+  for (const group of groups) {
+    await mkdir(path.join(outDir, group.id), { recursive: true });
+    await writeFile(
+      path.join(outDir, group.id, "index.html"),
+      topicPageHtml(group, groups),
+    );
+  }
+
   await writeFile(
     path.join(outDir, "assets", "style.css"),
     await readFile(path.join(root, "src", "assets", "style.css")),
@@ -475,6 +590,14 @@ async function main(): Promise<void> {
     path.join(outDir, "assets", "app.js"),
     await readFile(path.join(compiledAssetDir, "app.js")),
   );
+  for (const [source, dest] of PHOTOSWIPE_ASSETS) {
+    await writeFile(
+      path.join(outDir, "assets", dest),
+      await readFile(
+        path.join(root, "node_modules", "photoswipe", "dist", source),
+      ),
+    );
+  }
   await writeFile(path.join(outDir, ".nojekyll"), "");
   await writeFile(cacheFile, JSON.stringify(cache));
 
@@ -483,8 +606,15 @@ async function main(): Promise<void> {
       await rm(path.join(mediaDir, stale), { force: true });
   }
 
+  const keep = new Set(["assets", "media", ...groups.map((g) => g.id)]);
+  for (const entry of await readdir(outDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && !keep.has(entry.name)) {
+      await rm(path.join(outDir, entry.name), { recursive: true, force: true });
+    }
+  }
+
   console.log(
-    `  ${photos.length} photographs \u2192 ${path.relative(root, outDir)} in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+    `  ${photos.length} photographs in ${groups.length} ${groups.length === 1 ? "chapter" : "chapters"} \u2192 ${path.relative(root, outDir)} in ${((Date.now() - started) / 1000).toFixed(1)}s`,
   );
 }
 
