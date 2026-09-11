@@ -290,6 +290,7 @@ button {
 
 .lightbox__image.is-zoomed {
   cursor: zoom-out;
+  touch-action: none;
 }
 
 .lightbox__image.is-ready {

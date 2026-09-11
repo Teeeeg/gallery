@@ -98,8 +98,51 @@ function openLightbox(index: number): void {
 
 image.addEventListener("load", () => image.classList.add("is-ready"));
 
-image.addEventListener("mousemove", (event) => {
+/** Touch implicitly captures the pointer, so drags that start on the image pan it. */
+image.addEventListener("pointermove", (event) => {
   if (zoom > 1) setOrigin(event.clientX, event.clientY);
+});
+
+let start: { x: number; y: number; onImage: boolean } | null = null;
+let dragged = false;
+
+dialog.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  start = {
+    x: event.clientX,
+    y: event.clientY,
+    onImage: event.target === image,
+  };
+  dragged = false;
+});
+
+dialog.addEventListener("pointermove", (event) => {
+  if (!start) return;
+  if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
+    dragged = true;
+  }
+});
+
+dialog.addEventListener("pointercancel", () => {
+  start = null;
+});
+
+dialog.addEventListener("pointerup", (event) => {
+  const from = start;
+  start = null;
+  if (!from) return;
+
+  if (!dragged) {
+    if (from.onImage && event.target === image) {
+      toggleZoom(event.clientX, event.clientY);
+    }
+    return;
+  }
+
+  if (zoom === 1 && event.pointerType === "touch") {
+    const delta = event.clientX - from.x;
+    if (Math.abs(delta) > 60) show(cursor + (delta < 0 ? 1 : -1));
+  }
 });
 
 dialog.addEventListener("click", (event) => {
@@ -108,7 +151,7 @@ dialog.addEventListener("click", (event) => {
   if (action === "prev") show(cursor - 1);
   else if (action === "next") show(cursor + 1);
   else if (action === "close") dialog.close();
-  else if (target === image) toggleZoom(event.clientX, event.clientY);
+  else if (dragged || target === image) return;
   else if (event.target === dialog || target?.closest(".lightbox__figure"))
     dialog.close();
 });
@@ -132,42 +175,6 @@ dialog.addEventListener("keydown", (event) => {
     show(cursor - 1);
   }
 });
-
-let touchX: number | null = null;
-dialog.addEventListener(
-  "touchstart",
-  (event) => {
-    touchX = event.changedTouches[0].clientX;
-  },
-  { passive: true },
-);
-
-dialog.addEventListener(
-  "touchmove",
-  (event) => {
-    if (zoom > 1) {
-      setOrigin(
-        event.changedTouches[0].clientX,
-        event.changedTouches[0].clientY,
-      );
-    }
-  },
-  { passive: true },
-);
-
-dialog.addEventListener(
-  "touchend",
-  (event) => {
-    if (touchX === null || zoom > 1) {
-      touchX = null;
-      return;
-    }
-    const delta = event.changedTouches[0].clientX - touchX;
-    if (Math.abs(delta) > 60) show(cursor + (delta < 0 ? 1 : -1));
-    touchX = null;
-  },
-  { passive: true },
-);
 
 const sections = [...document.querySelectorAll<HTMLElement>(".chapter")];
 const filters = [
