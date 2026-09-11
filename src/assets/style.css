@@ -104,7 +104,7 @@ button {
 /* ---------- chapters menu ---------- */
 
 .back {
-  position: fixed;
+  position: absolute;
   top: 1rem;
   left: 1rem;
   z-index: 20;
@@ -114,8 +114,7 @@ button {
   text-transform: uppercase;
   text-decoration: none;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(8px);
+  background: var(--paper);
   border: 1px solid var(--rule);
   transition: color 0.25s ease, border-color 0.25s ease;
 }
@@ -135,7 +134,7 @@ button {
 }
 
 .chapters {
-  position: fixed;
+  position: absolute;
   top: 1rem;
   right: 1rem;
   z-index: 20;
@@ -149,8 +148,7 @@ button {
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(8px);
+  background: var(--paper);
   border: 1px solid var(--rule);
   transition: color 0.25s ease, border-color 0.25s ease;
 }
